@@ -1,65 +1,63 @@
-# Modelo base (*baseline*): dummies, regla de una variable y heurística clínica
+# Exploración inicial de datos: esquema, unificación de nulos y persistencia en parquet
+
+Closes #9
 
 ## ✨ Context
 
-Quinta etapa del ciclo de vida del proyecto (`notebooks/5-models`), siguiendo la guía del
-curso [Ciencia de Datos en Producción — Baseline Model](https://joserzapata.github.io/post/ciencia-datos-proyecto-python/5-baseline_model/).
+Segunda etapa del ciclo de vida del proyecto (`notebooks/2-exploration`), siguiendo la guía
+del curso [Ciencia de Datos en Producción — Exploración](https://joserzapata.github.io/post/ciencia-datos-proyecto-python/2-exploration/).
 
-Con el pipeline de preparación ya construido en la etapa 4 (PR #18), falta lo más
-importante antes de entrenar cualquier modelo: **saber contra qué se va a comparar**. Sin
-un punto de referencia, un 80 % de exactitud parece un buen resultado hasta que uno
-descubre que responder siempre "sano" ya acierta el 54 %. Este PR entrega el notebook que
-fija ese punto de referencia y, de paso, verifica que la tubería completa (datos →
-preprocesamiento → estimador → evaluación) funciona de extremo a extremo.
+La carpeta `notebooks/2-exploration/` estaba vacía. Este PR cubre el hueco: antes de
+analizar distribuciones o entrenar nada hay que responder una pregunta más básica —**¿qué
+hay realmente en este archivo y de qué tipo es cada cosa?**—. La respuesta corta es que una
+lectura normal con `pd.read_csv` devuelve **13 de las 14 columnas como texto**, así que
+literalmente ninguna operación numérica funciona sobre los datos crudos.
 
-Rama: `5-baseline`, creada desde `main` siguiendo Gitflow.
+Rama: `feature/exploracion-inicial`, creada desde `main` siguiendo Gitflow.
 
 ## 🧠 Rationale behind the change
 
-**1. Se eligió una heurística clínica como modelo base oficial, no un `DummyClassifier`.**
+**1. La decisión de diseño central: esta etapa no elimina ni una sola fila.**
 
-El requerimiento admite ambas opciones. El *dummy* fija el listón en ROC-AUC 0.500, que es
-un adversario trivial: cualquier modelo lo supera y eso no informa nada. La heurística
-—contar cuatro señales de riesgo (`chest_pain == asymptomatic`, `exang == 1`,
-`old_peak > 1.0`, `ca > 0`) sin aprender ningún parámetro— lo fija en **0.848**. Un modelo
-de *machine learning* que no supere ese número no justifica su costo de mantenimiento
-frente a una lista de chequeo en papel. Los cinco *dummy* se conservan documentados como
-piso absoluto y como prueba de sanidad del montaje experimental.
+Es la restricción que gobierna todo el notebook y conviene defenderla explícitamente,
+porque es tentador aprovechar el viaje para limpiar de una vez. El archivo de salida tiene
+exactamente las mismas 3 030 filas que el de entrada; lo único que cambia es **cómo están
+representados** los datos.
 
-**2. El pipeline de la etapa 4 se movió del notebook a `src/pipelines/feature_pipeline/`.**
+El motivo es que eliminar duplicados, imputar faltantes o descartar registros incompletos
+son decisiones que **dependen del modelo que se vaya a entrenar**, y por lo tanto pertenecen
+a la etapa 4. Adelantarlas aquí haría irreversible una transformación que debería ser sólo
+de formato. Con esta frontera, la salida de la etapa 2 es auditable: se puede demostrar que
+no se perdió información, y de hecho el notebook lo verifica.
 
-Este es el cambio estructural del PR y merece justificación, porque toca código ya
-mergeado. En la etapa 4 los transformadores personalizados vivían dentro del notebook, lo
-que tenía dos consecuencias:
+**2. Se lee todo con `dtype=str` y `keep_default_na=False`.**
 
-- El artefacto serializado `models/pipeline_feature_engineering.joblib` **no se puede
-  deserializar** sin volver a ejecutar las celdas que definen `RecortadorAtipicos` y
-  `MarcadorAtipicos`, porque pickle los referencia como `__main__.<clase>`.
-- La alternativa —copiar y pegar el código a este notebook— habría creado dos versiones
-  del mismo pipeline que se desincronizan a la primera corrección.
+Es lo contrario de lo que hace `read_csv` por defecto, y es deliberado. Si pandas infiere
+los tipos, una sola celda corrupta convierte silenciosamente una columna numérica en texto y
+el problema queda invisible. Leyendo todo literalmente, la inferencia de tipos pasa a ser una
+**decisión explícita y documentada** del notebook en lugar de un efecto secundario. Y sin
+`keep_default_na=False` no se podría ni siquiera ver qué convenciones de nulo usa el archivo,
+que es el punto 2 del requerimiento.
 
-El código es **el mismo**; lo que cambia es dónde vive. Se verifica en el notebook que
-`limpiar_datos()` reproduce el dataset limpio de la etapa 4 de forma idéntica (303 × 14).
-Ahora el pipeline es importable, versionado y cubierto por pruebas en cada *push*.
+**3. Tipos *nullable* de pandas en lugar de `float64` para todo.**
 
-**3. Validación cruzada repetida (5 × 6) en lugar de 5 *folds* simples.**
+La conversión ingenua deja todo en coma flotante, lo que miente sobre la naturaleza del
+dato (`ca = 2.0` vasos sanguíneos), pierde la intención de las booleanas y desperdicia
+memoria. Se usan `Int16`, `Int8`, `Float32`, `boolean` y `category`, que admiten `pd.NA` sin
+degradar a *float*. Es la única forma de tener una columna **entera y con faltantes a la
+vez**.
 
-Con 242 pacientes de entrenamiento, cada *fold* de validación tiene ~48 casos. Una sola
-pasada de 5 particiones produce desviaciones estándar tan ruidosas que dos modelos
-separados por 3 puntos parecerían indistinguibles. Se usan 30 evaluaciones por modelo.
+**4. Parquet, con la contraprueba incluida.**
 
-**4. ROC-AUC como métrica de decisión, con 10 métricas más reportadas.**
-
-El problema tiene costo asimétrico (un falso negativo es un paciente enfermo enviado a
-casa). Se reporta un panel de 11 métricas porque **ninguna sirve sola**, y el notebook lo
-demuestra con un contraejemplo: `dummy_todos_enfermos` alcanza sensibilidad 1.000 y F1
-0.629 con MCC 0.000.
+El notebook no se limita a afirmar que parquet es "un formato adecuado": guarda el mismo
+DataFrame en CSV y compara. El resultado es que **0 de 14 tipos sobreviven al CSV y 14 de 14
+sobreviven al parquet**. Sin esa evidencia, la elección de formato parecería administrativa;
+con ella queda claro que es lo que hace reutilizable todo el trabajo de la sección 5.
 
 ## Type of changes
 
 - [x] ✨ New Feature (changes that introduce new functionality)
 - [x] ⚗️ Experiments (A notebook with experimentation results)
-- [x] ✅ Tests (Unit tests, integration tests, end-to-end tests)
 
 ## 🛠 What does this PR implement
 
@@ -67,80 +65,73 @@ demuestra con un contraejemplo: `dummy_todos_enfermos` alcanza sensibilidad 1.00
 
 | Archivo | Qué es |
 |---|---|
-| `notebooks/5-models/05_baseline_model-CJPS-2026-08-21.ipynb` | Notebook principal: 17 secciones, ejecutado de extremo a extremo con todas las salidas |
-| `src/pipelines/feature_pipeline/feature_pipeline.py` | Pipeline de la etapa 4 como módulo importable: contratos de datos, limpieza, transformadores y fábrica |
-| `src/pipelines/feature_pipeline/__init__.py` | Superficie pública del módulo |
-| `tests/pipelines/feature_pipeline/test_feature_pipeline.py` | 7 pruebas del módulo (98 % de cobertura de líneas) |
+| `notebooks/2-exploration/02_exploracion_inicial-CJPS-2026-08-21.ipynb` | Notebook principal: 10 secciones, ejecutado de extremo a extremo con todas las salidas |
+| `PULL_REQUEST.md` | Esta descripción |
 
-### Contenido del notebook
+No se toca ningún archivo existente de código ni de configuración.
 
-- **Reutilización del pipeline de la etapa anterior**, verificando que reproduce el
-  dataset limpio de forma idéntica.
-- **Partición train/test** 80/20 estratificada, con la misma semilla de la etapa 4 (242 /
-  61 pacientes) para que los resultados sean comparables entre etapas.
-- **11 métricas** con justificación clínica de cada una: exactitud, exactitud balanceada,
-  precisión, sensibilidad, especificidad, F1, F2, ROC-AUC, PR-AUC, MCC y *Brier score*.
-- **Validación cruzada** `RepeatedStratifiedKFold(5 × 6)` con media y desviación estándar
-  reportadas para cada métrica y cada modelo.
-- **Selección de la variable más importante** triangulando dos criterios independientes
-  (información mutua y ROC-AUC de un modelo univariado en validación cruzada).
-- **Curvas de aprendizaje** con `learning_curve(..., return_times=True)`.
-- **Gráficas de escalabilidad**: tiempo de ajuste vs. n, tiempo de evaluación vs. n y
-  score vs. tiempo de ajuste.
-- **Interpretación, análisis, conclusiones, recomendaciones y propuestas** (secciones 12
-  a 17).
+### Los cuatro puntos del issue
 
-### Resultados principales (validación cruzada, 30 evaluaciones)
-
-| Modelo | Exactitud | Sensibilidad | ROC-AUC | MCC |
-|---|---|---|---|---|
-| `dummy_mayoritaria` | 0.541 ± 0.006 | 0.000 | **0.500 ± 0.000** | 0.000 |
-| `dummy_todos_enfermos` | 0.459 ± 0.006 | **1.000** | 0.500 ± 0.000 | 0.000 |
-| `regla_1var(thal)` | 0.768 ± 0.060 | 0.719 ± 0.089 | 0.765 ± 0.061 | 0.536 |
-| **`heuristica_clinica`** (modelo base) | 0.781 ± 0.061 | 0.775 ± 0.090 | **0.848 ± 0.055** | 0.562 |
-| `referencia_reg_logistica` | 0.804 ± 0.062 | 0.743 ± 0.086 | 0.883 ± 0.045 | 0.609 |
-
-**Variable más importante: `thal`** (ROC-AUC univariado 0.765 ± 0.061, información mutua
-0.156 nats). Primera por ambos criterios, y con justificación clínica: mide directamente
-la perfusión miocárdica en lugar de ser un factor de riesgo indirecto.
+| Punto | Cómo se resolvió | Resultado |
+|---|---|---|
+| **Descripción general** | Lectura como texto, comparación entre tipos inferidos y esperados, resumen por columna, análisis de duplicados | 3 030 × 14; con lectura normal 13 de 14 columnas vuelven como texto |
+| **Unificar nulos** | Búsqueda exhaustiva de 17 tokens de nulo + invalidación contra dominios y rangos | Una sola representación (`NaN`): 1 647 visibles + **33 ocultos** |
+| **Tipos correctos** | `Int16`, `Int8`, `Float32`, `boolean`, `category` | 0 columnas de texto; memoria **−82 %** |
+| **Formato adecuado** | `.parquet` + *snappy*, con verificación de ida y vuelta y contraprueba contra CSV | **−91 %** de tamaño; esquema intacto al releer |
 
 ### Hallazgos que conviene discutir en la revisión
 
-1. **El margen para el *machine learning* es estrecho.** Una regla escrita a mano llega a
-   0.848 y una regresión logística sobre los 42 atributos procesados a 0.883: 3.5 puntos,
-   con bandas de una desviación estándar que se solapan.
-2. **La curva de aprendizaje se aplana casi de inmediato.** La validación de la regresión
-   logística pasa de 0.867 con 19 pacientes a 0.876 con 193. Multiplicar por diez los
-   datos aportó menos de un punto. El techo lo pone la información de las variables, no el
-   tamaño de la muestra — conviene invertir en mejores variables antes que en más filas.
-3. **`thal` podría tener circularidad diagnóstica.** Si la gammagrafía formó parte del
-   proceso que generó la etiqueta `disease`, su poder predictivo está inflado. Queda
-   registrado como hipótesis a verificar, no como hecho.
+1. **El 81 % del archivo son duplicados exactos.** Las 3 030 filas contienen sólo **568**
+   combinaciones distintas, más 15 filas completamente vacías. El tamaño real del conjunto
+   es mucho menor de lo que aparenta. Se documenta aquí y se resuelve en la etapa 4.
+
+2. **Hay 33 faltantes disfrazados de dato válido.** Cadenas como `'fggfds'` o números como
+   `2345` en columnas de texto. `df.isna()` los reporta como presentes; sólo se detectan
+   validando contra el diccionario de datos. **Cinco de ellos están en la variable
+   objetivo** (`'fsg'`, `'gsfdg'`, `'g'`, `'sf'`, `'fsdg'`), lo que los vuelve registros
+   inservibles para entrenar y para evaluar.
+
+3. **Un espacio invisible podía destruir el 46 % de una columna.** Las **1 387** apariciones
+   de `left ventricular hypertrophy ` llevan un espacio final — es decir, *todas* las de esa
+   categoría. Validar contra el dominio sin normalizar antes las habría convertido en
+   faltantes, sin ningún mensaje de error. De ahí que el notebook insista en el orden:
+   normalizar primero, validar después.
+
+4. **Los rangos fisiológicos no descartaron nada.** Toda la basura era texto sin sentido, no
+   dígitos mal tecleados: los valores convertibles ya estaban dentro de lo plausible (edad
+   29-77, presión 94-200, colesterol 126-564). La validación por rango se conserva como red
+   de seguridad, pero es honesto registrar que en este archivo no fue la que atrapó nada.
+
+5. **Verificación cruzada con `src/pipelines/feature_pipeline/`.** El notebook declara sus
+   dominios a partir del diccionario de datos, y una celda comprueba que **coinciden con los
+   del módulo** que usan las etapas 4 y 5, fallando si divergen. La única diferencia
+   detectada es benigna y va en la dirección segura: el módulo acepta `atypical` en
+   `chest_pain`, una categoría que no aparece ni una vez en el archivo.
 
 ## 🙈 Missing
 
-- No se optimiza ningún hiperparámetro: corresponde a la etapa 5.1 (entrenamiento).
-- La regresión logística aparece sólo como cota superior de referencia, no como modelo
-  candidato; no se ajusta ni se regulariza.
-- El umbral de decisión se deja en 0.5 por defecto. El notebook recomienda ajustarlo con
-  criterio clínico, pero no lo hace aquí.
-- `models/modelo_base.joblib` y los CSV de `data/08_reporting/` se generan al ejecutar el
-  notebook y no se versionan (están en `.gitignore`).
+- No se eliminan duplicados ni filas vacías, no se imputa nada y no se descartan los
+  registros sin *target*: es deliberado, corresponde a la etapa 4 (ver *Rationale* punto 1).
+- No hay análisis de distribuciones, correlaciones ni relación con el *target*: eso es la
+  etapa 3.
+- `data/` está en `.gitignore`, así que `corazon_tipificado.parquet` **no se versiona**. Se
+  regenera ejecutando el notebook.
 
 ## 🧪 How should this be tested?
 
 ```bash
 uv sync --all-extras --dev
-uv run pytest --cov          # 7 pruebas nuevas, 98 % de cobertura del módulo
 uvx pre-commit run --all-files
 ```
 
-Para reproducir el notebook completo (~1 minuto):
+Para reproducir el notebook completo (~15 segundos):
 
 ```bash
 uv run jupyter nbconvert --to notebook --execute --inplace \
-  notebooks/5-models/05_baseline_model-CJPS-2026-08-21.ipynb
+  notebooks/2-exploration/02_exploracion_inicial-CJPS-2026-08-21.ipynb
 ```
 
-Todo es determinista con `random_state=42`; los números deben coincidir exactamente con
-los del notebook versionado.
+Debe generar `data/02_intermediate/corazon_tipificado.parquet` (≈19 KB) y todas las
+verificaciones de las secciones 6, 7.1 y 8 deben salir en `OK`. El notebook **lanza
+`ValueError` si alguna falla**, así que una ejecución sin excepciones es en sí misma la
+prueba.
