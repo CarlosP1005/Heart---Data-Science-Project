@@ -93,16 +93,3 @@ max-complexity = 10
 
 [lint.isort]
 known-third-party = ["fastapi", "pydantic"]
-
-[lint.per-file-ignores]
-# Los notebooks de análisis exploratorio siguen convenciones distintas al código
-# de producción. Se mantienen activas las reglas que sí importan (F401 imports
-# sin usar, I001 orden de imports, formato) y se silencian las que solo generan
-# ruido en un EDA:
-"*.ipynb" = [
-    "E402",    # imports después de código: normal al ir agregando celdas
-    "PLR2004", # comparación con valor literal: son los umbrales del análisis
-    "B905",    # zip() sin strict=: irrelevante con arrays de igual longitud
-    "RUF001",  # Unicode "ambiguo": α, ρ, ×, − en títulos y etiquetas de gráficos
-    "RUF005",  # concatenación de listas en vez de desempaquetado
-]

@@ -133,3 +133,84 @@ out/
 
 # Spyder
 .spyproject/
+
+"""Repara un .ipynb cuyo JSON se rompió por caracteres de control crudos.
+
+Recorre el archivo carácter a carácter llevando la cuenta de si está dentro de
+una cadena JSON. Cualquier carácter de control que aparezca dentro de una cadena
+se re-escapa (\\n, \\r, \\t) o se elimina. Fuera de las cadenas no toca nada.
+
+Uso:  python3 reparar_ipynb.py notebooks/mi_notebook.ipynb
+"""
+
+import json
+import sys
+from pathlib import Path
+
+ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def reparar(texto: str) -> tuple[str, int]:
+    salida = []
+    dentro_de_cadena = False
+    tras_barra = False
+    arreglados = 0
+
+    for ch in texto:
+        if tras_barra:
+            salida.append(ch)
+            tras_barra = False
+            continue
+        if dentro_de_cadena and ch == "\\":
+            salida.append(ch)
+            tras_barra = True
+            continue
+        if ch == '"':
+            dentro_de_cadena = not dentro_de_cadena
+            salida.append(ch)
+            continue
+        if dentro_de_cadena and ord(ch) < 0x20:
+            salida.append(ESCAPES.get(ch, ""))
+            arreglados += 1
+            continue
+        salida.append(ch)
+
+    return "".join(salida), arreglados
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(__doc__)
+        return 2
+
+    ruta = Path(sys.argv[1])
+    crudo = ruta.read_text(encoding="utf-8", errors="replace")
+
+    try:
+        json.loads(crudo)
+    except json.JSONDecodeError as e:
+        print(f"JSON inválido: {e}")
+    else:
+        print("El archivo ya era JSON válido. No se ha modificado.")
+        return 0
+
+    texto, n = reparar(crudo)
+
+    try:
+        nb = json.loads(texto)
+    except json.JSONDecodeError as e:
+        print(f"No se pudo reparar automáticamente: {e}")
+        return 1
+
+    respaldo = ruta.with_suffix(".ipynb.bak")
+    respaldo.write_text(crudo, encoding="utf-8", newline="\n")
+    ruta.write_text(texto, encoding="utf-8", newline="\n")
+
+    print(f"Reparado: {n} carácter(es) de control re-escapados.")
+    print(f"Celdas: {len(nb.get('cells', []))}")
+    print(f"Copia del original en: {respaldo.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
