@@ -3,17 +3,21 @@ name = "template-data-science-container"
 version = "0.1.0"
 description = "Template for data science and AI Projects with the last stable version of python and devcontainer"
 authors = [
-    "Jose R. Zapata <joserzapata.github.io>",
+    { name = "Jose R. Zapata", email = "joserzapata@users.noreply.github.com" },
 ]
 requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
     "ipykernel>=7.3.0",
+    "joblib>=1.5.3",
     "matplotlib>=3.11.1",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
     "pyarrow>=25.0.1",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.16.3",
+    "seaborn>=0.13.2",
 ]
 
 [project.urls]
@@ -22,6 +26,16 @@ repository = "https://github.com//template-data-science-container"
 
 
 [dependency-groups]
+# Motores de AutoML y librerias de interpretabilidad usados por los notebooks de la
+# etapa 6. No entran en `default-groups`: el CI no los necesita y son pesados.
+automl = [
+    "catboost>=1.2.8",
+    "flaml[automl]>=2.3.5",
+    "lightgbm>=4.6.0",
+    "mljar-supervised>=1.1.17",
+    "shap>=0.48.0",
+    "xgboost>=2.1.4,<3.0.0",
+]
 dev = [
     "pre-commit>=4.6.1", # Code linting and formatting
     "pytest>=9.1.1", # Testing framework
