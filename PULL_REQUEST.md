@@ -11,7 +11,7 @@ El punto de partida son los dos números que dejó la etapa 5: el modelo base of
 **heurística clínica con ROC-AUC 0.848 ± 0.055**, y la recomendación explícita de fijar el
 criterio de éxito en **ROC-AUC > 0.90**.
 
-Rama: `feature/seleccion-modelo-automl`, creada desde `main` siguiendo Gitflow.
+Rama: `6-Mejor-modelo`, creada desde `main` siguiendo Gitflow.
 
 **Resultado en una línea:** tres estrategias de búsqueda independientes convergen a una
 **regresión logística con regularización L2 fuerte** (`C ≈ 0.033`) que alcanza **ROC-AUC
