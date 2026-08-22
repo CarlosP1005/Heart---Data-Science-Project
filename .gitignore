@@ -8,6 +8,12 @@ data/**
 # artefactos de modelos serializados (se regeneran ejecutando los notebooks)
 models/*.joblib
 
+# excepcion: el modelo seleccionado en la etapa 6 es un entregable del issue #13
+!models/modelo_seleccionado_automl.joblib
+
+# CatBoost escribe aqui sus logs de entrenamiento al ejecutar los notebooks
+catboost_info/
+
 # also keep all .gitkeep files
 !.gitkeep
 
